@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>송영서비스 HWPX 생성기</title>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+  .container { max-width: 920px; margin: 0 auto; background: #fff; border-radius: 12px; padding: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+  h1 { margin: 0 0 8px; font-size: 22px; color: #333; }
+  p.sub { margin: 0 0 24px; color: #888; font-size: 13px; }
+  .row { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
+  .row label { min-width: 180px; font-weight: bold; font-size: 14px; }
+  .row input { flex: 1; font-size: 13px; }
+  .btn { display: block; width: 100%; padding: 14px; background: #1976d2; color: #fff; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; margin-top: 20px; }
+  .btn:hover { background: #1565c0; }
+  .btn:disabled { background: #999; cursor: not-allowed; }
+  .hint { font-size: 11px; color: #999; margin-top: 2px; }
+  .msg { margin-top: 16px; padding: 12px; border-radius: 8px; font-size: 14px; }
+  .msg.ok { background: #e8f5e9; color: #2e7d32; }
+  .msg.err { background: #ffebee; color: #c62828; }
+  .result { margin-top: 24px; }
+  .result h2 { font-size: 17px; margin: 0 0 4px; color: #333; }
+  .result .info { font-size: 13px; color: #666; margin-bottom: 12px; }
+  .dl-btn { display: inline-block; padding: 10px 24px; background: #1976d2; color: #fff; border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: bold; margin-bottom: 16px; cursor: pointer; border: none; }
+  .dl-btn:hover { background: #1565c0; }
+  table.data { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+  table.data th { background: #f0f0f0; padding: 7px 5px; border: 1px solid #ddd; text-align: center; font-weight: bold; }
+  table.data td { padding: 6px 5px; border: 1px solid #ddd; text-align: center; }
+  table.data tr:hover { background: #f9f9f9; }
+  .warn-list { margin: 12px 0; padding: 10px 16px; background: #fff3e0; border-radius: 6px; font-size: 13px; color: #e65100; }
+  #progress { display: none; margin-top: 16px; padding: 12px; background: #e3f2fd; border-radius: 8px; font-size: 14px; color: #1565c0; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>송영서비스 HWPX 생성기</h1>
+  <p class="sub">원본 한글 파일, 엑셀 바우처 데이터, 송영정보를 업로드하면<br>월/날짜/시간/비용이 자동 교체된 한글 문서를 생성합니다.</p>
+
+  <div class="row">
+    <label>① 원본 HWPX (.hwpx)</label>
+    <input type="file" id="hwpxFile" accept=".hwpx">
+  </div>
+  <div class="row">
+    <label>② 송영서비스 엑셀 (.xlsx)</label>
+    <input type="file" id="excelFile" accept=".xlsx,.xls">
+  </div>
+  <div class="row">
+    <label>③ 송영정보 엑셀 (.xlsx)</label>
+    <input type="file" id="tripFile" accept=".xlsx,.xls">
+  </div>
+  <p class="hint">송영정보: 이용자별 오전/오후 송영 시간이 기재된 파일</p>
+  <button class="btn" id="genBtn" onclick="doGenerate()">HWPX 문서 생성</button>
+
+  <div id="progress">처리 중...</div>
+  <div id="msgArea"></div>
+  <div id="resultArea"></div>
+</div>
+
+<script>
+function parseTripInfo(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const wb = XLSX.read(e.target.result, {type:'array'});
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+        let headerIdx = -1;
+        for (let i = 0; i < Math.min(rows.length, 10); i++) {
+          if (rows[i].some(c => String(c).includes('이용자'))) { headerIdx = i; break; }
+        }
+        if (headerIdx < 0) { resolve({}); return; }
+        const info = {};
+        for (let i = headerIdx + 1; i < rows.length; i++) {
+          const r = rows[i];
+          const name = String(r[1] || '').trim();
+          if (!name || name.includes('총')) continue;
+          const amStr = String(r[2] || '-').trim();
+          const pmStr = String(r[3] || '-').trim();
+          const amM = amStr.match(/(\d+)/);
+          const pmM = pmStr.match(/(\d+)/);
+          info[name] = { am_min: amM ? parseInt(amM[1]) : null, pm_min: pmM ? parseInt(pmM[1]) : null };
+        }
+        resolve(info);
+      } catch(err) { reject(err); }
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function parseExcel(file, tripInfo) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const wb = XLSX.read(e.target.result, {type:'array', cellDates:true});
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:'', raw:false});
+        let headerIdx = -1, headers = {};
+        for (let i = 0; i < Math.min(rows.length, 10); i++) {
+          const idx = rows[i].findIndex(c => String(c).includes('서비스유형'));
+          if (idx >= 0) { headerIdx = i; break; }
+        }
+        if (headerIdx < 0) { reject('서비스유형 헤더를 찾을 수 없습니다.'); return; }
+        rows[headerIdx].forEach((v, ci) => { if (v) headers[String(v).trim()] = ci; });
+
+        const svcCol = headers['서비스유형'];
+        const nameCol = headers['대상자명'];
+        const groupCol = headers['대상자 인원'];
+        const dateCol = headers['승인일시'];
+        const users = {};
+        let month = null;
+
+        for (let i = headerIdx + 1; i < rows.length; i++) {
+          const r = rows[i];
+          if (String(r[svcCol] || '').trim() !== '송영서비스') continue;
+          const name = String(r[nameCol] || '').trim();
+          if (!name) continue;
+          if (!users[name]) users[name] = { name, group_str: String(r[groupCol] || '').trim(), dates: [] };
+          const dStr = String(r[dateCol] || '').trim();
+          if (dStr) {
+            const d = new Date(dStr);
+            if (!isNaN(d)) { users[name].dates.push(d); if (!month) month = d.getMonth() + 1; }
+          }
+        }
+
+        for (const name of Object.keys(users)) {
+          const u = users[name];
+          const gs = u.group_str;
+          if (gs.includes('집중') || gs.includes('1인')) u.unit_price = 25910;
+          else if (gs.includes('2인')) u.unit_price = 17270;
+          else u.unit_price = 13820;
+          u.dates.sort((a,b) => a-b);
+          u.day_count = u.dates.length;
+          if (u.dates.length > 0) {
+            const fmt = d => `${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')}`;
+            u.date_range = `${fmt(u.dates[0])}~${fmt(u.dates[u.dates.length-1])}`;
+          } else u.date_range = '';
+          const ti = tripInfo[name] || {};
+          u.am_min = ti.am_min || null;
+          u.pm_min = ti.pm_min || null;
+          const amTotal = (u.am_min || 0) * u.day_count;
+          const pmTotal = (u.pm_min || 0) * u.day_count;
+          const totalMin = amTotal + pmTotal;
+          function fmtH(min) {
+            const h = Math.floor(min/60), m = min%60;
+            if (h>0 && m>0) return `${h}시간${m}분`;
+            if (h>0) return `${h}시간`;
+            if (m>0) return `${m}분`;
+            return '0시간';
+          }
+          u.am_hours_str = u.am_min ? fmtH(amTotal) : null;
+          u.pm_hours_str = u.pm_min ? fmtH(pmTotal) : null;
+          u.total_hours_int = Math.floor(totalMin / 60);
+          u.final_cost = u.total_hours_int * u.unit_price;
+        }
+        resolve({users, month: month || new Date().getMonth()+1});
+      } catch(err) { reject(err); }
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+async function processHwpx(hwpxFile, usersData, newMonth) {
+  const buf = await hwpxFile.arrayBuffer();
+  const zip = await JSZip.loadAsync(buf);
+  const sectionFile = zip.file('Contents/section0.xml');
+  if (!sectionFile) throw new Error('section0.xml을 찾을 수 없습니다.');
+  const xmlStr = await sectionFile.async('string');
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(xmlStr, 'application/xml');
+  const ns = 'http://www.hancom.co.kr/hwpml/2011/paragraph';
+  const tEls = Array.from(doc.getElementsByTagNameNS(ns, 't'));
+  const mm = String(newMonth).padStart(2, '0');
+
+  let oldMonthStr = null;
+  for (const t of tEls) {
+    const txt = t.textContent || '';
+    if (txt.includes('년') && txt.includes('월')) {
+      const m = txt.match(/(\d{2})월/);
+      if (m) { oldMonthStr = m[1]; break; }
+    }
+  }
+  if (!oldMonthStr) throw new Error('이전 달 월 정보를 찾을 수 없습니다.');
+
+  const oldDateRe = new RegExp(`^${oldMonthStr}\\.\\d{2}~${oldMonthStr}\\.\\d{2}$`);
+  const oldSingleRe = new RegExp(`^${oldMonthStr}\\.\\d{2}$`);
+  let curUser = null, curDir = null, clearing = false, dirCount = 0;
+  const warnings = [];
+
+  for (let i = 0; i < tEls.length; i++) {
+    const el = tEls[i];
+    let txt = el.textContent || '';
+    let s = txt.trim();
+
+    if (txt.includes('년') && txt.includes('월') && txt.includes(oldMonthStr+'월')) {
+      el.textContent = txt.replace(oldMonthStr+'월', mm+'월'); continue;
+    }
+    if (s === '이용자명') {
+      curDir = null; clearing = false; dirCount = 0;
+      for (let j = i+1; j < Math.min(i+10, tEls.length); j++) {
+        const nt = (tEls[j].textContent||'').trim();
+        if (nt && nt !== '그룹유형/급여유형' && !nt.includes('/') && nt.length >= 2 && nt.length <= 5) { curUser = nt; break; }
+      }
+      continue;
+    }
+    if (!curUser || !usersData[curUser]) continue;
+    const u = usersData[curUser];
+    const pmOnly = (u.am_min === null && u.pm_min !== null);
+    const amOnly = (u.am_min !== null && u.pm_min === null);
+
+    if (['주거지→','거주지→','제공기관→'].includes(s)) {
+      dirCount++;
+      const det = ['주거지→','거주지→'].includes(s) ? 'am' : 'pm';
+      if (pmOnly) {
+        if (dirCount === 1) {
+          curDir = 'pm'; clearing = false;
+          if (det === 'am') {
+            el.textContent = '제공기관→';
+            for (let j=i+1; j<Math.min(i+3,tEls.length); j++)
+              if ((tEls[j].textContent||'').trim()==='제공기관') { tEls[j].textContent='주거지'; break; }
+          }
+        } else { curDir = det; clearing = true; el.textContent = ''; }
+      } else if (amOnly) {
+        if (dirCount === 1) {
+          curDir = 'am'; clearing = false;
+          if (det === 'pm') {
+            el.textContent = '주거지→';
+            for (let j=i+1; j<Math.min(i+3,tEls.length); j++)
+              if ((tEls[j].textContent||'').trim()==='주거지') { tEls[j].textContent='제공기관'; break; }
+          }
+        } else { curDir = det; clearing = true; el.textContent = ''; }
+      } else { curDir = det; clearing = false; }
+    } else if (s.includes('총 송영서비스 이용시간')) { curDir = 'total'; clearing = false; }
+    else if (/^[1-4]$/.test(s)) clearing = false;
+    else if (['송영서비스 제공 내역','송영서비스 시간 및 이용','연번','보호자'].includes(s)) clearing = false;
+
+    if (clearing && (curDir==='am'||curDir==='pm')) {
+      const stru = ['1','2','3','4','연번','구분','일시 및 시간','장소','산출내역','송영시간','총 송영서비스 이용시간','송영서비스 시간 및 이용','송영서비스 제공 내역'];
+      if (s && !stru.includes(s) && !s.startsWith('※')) { el.textContent = ''; continue; }
+    }
+
+    let dMin, dHrs;
+    if (curDir==='am') { dMin=u.am_min; dHrs=u.am_hours_str||''; }
+    else if (curDir==='pm') { dMin=u.pm_min; dHrs=u.pm_hours_str||''; }
+    else { dMin=u.am_min||u.pm_min; dHrs=u.am_hours_str||u.pm_hours_str||''; }
+
+    const prev = [];
+    for (let k=Math.max(0,i-5); k<i; k++) { const t2=(tEls[k].textContent||'').trim(); if(t2) prev.push(t2); }
+    const fmtCost = n => n.toLocaleString();
+
+    if (oldDateRe.test(s)) el.textContent = dMin!=null ? u.date_range : '';
+    else if (oldSingleRe.test(s)) el.textContent = dMin!=null ? u.date_range : '';
+    else if (/^\d+분?\s*×\d+일$/.test(s)) el.textContent = dMin ? `${dMin}분×${u.day_count}일` : '';
+    else if (/^\d+×\d+일$/.test(s)) el.textContent = dMin ? `${dMin}분×${u.day_count}일` : '';
+    else if (/^\d+시간\d+분$/.test(s)) {
+      if (prev.includes('총 송영서비스 이용시간')||prev.includes('제공시간')||prev.includes('바우처'))
+        el.textContent = `${u.total_hours_int}시간`;
+      else el.textContent = dHrs || '';
+    } else if (/^\d+분$/.test(s)) {
+      if (prev.some(p=>p.includes('×')||p.includes('일'))) el.textContent = dHrs || '';
+    } else if (/^\d+시간$/.test(s)) {
+      if (prev.includes('총 송영서비스 이용시간')||prev.includes('제공시간')||prev.includes('바우처'))
+        el.textContent = `${u.total_hours_int}시간`;
+      else el.textContent = dHrs || '';
+    } else if (/^\d+시간(\d+분)?×[\d,]+원?$/.test(s)||/^\d+시간(\d+분)?×[\d,]*$/.test(s))
+      el.textContent = `${u.total_hours_int}시간×${fmtCost(u.unit_price)}원`;
+    else if (/^×[\d,]+원?$/.test(s)) el.textContent = `×${fmtCost(u.unit_price)}원`;
+    else if (/^[\d,]+원$/.test(s) && s.length > 4) el.textContent = `${fmtCost(u.final_cost)}원`;
+    else if (/^[\d,]+$/.test(s) && s.includes(',') && s.length >= 4) el.textContent = `${fmtCost(u.final_cost)}원`;
+    else if (/^=[\d,]+원$/.test(s)) el.textContent = `=${fmtCost(u.final_cost)}원`;
+  }
+
+  const found = new Set();
+  for (const t of tEls) { const v=(t.textContent||'').trim(); if(usersData[v]) found.add(v); }
+  for (const n of Object.keys(usersData)) if(!found.has(n)) warnings.push(`⚠️ '${n}' - 엑셀에는 있지만 HWPX 문서에 없습니다!`);
+
+  const newXml = new XMLSerializer().serializeToString(doc);
+  zip.file('Contents/section0.xml', newXml);
+  const blob = await zip.generateAsync({type:'blob', compression:'DEFLATE'});
+  return { blob, warnings };
+}
+
+async function doGenerate() {
+  const hwpx = document.getElementById('hwpxFile');
+  const excel = document.getElementById('excelFile');
+  const trip = document.getElementById('tripFile');
+  const msgA = document.getElementById('msgArea');
+  const resA = document.getElementById('resultArea');
+  const prog = document.getElementById('progress');
+  const btn = document.getElementById('genBtn');
+  msgA.innerHTML = ''; resA.innerHTML = '';
+
+  if (!hwpx.files[0]||!excel.files[0]||!trip.files[0]) {
+    msgA.innerHTML = '<div class="msg err">세 파일 모두 선택해 주세요.</div>'; return;
+  }
+  btn.disabled = true; prog.style.display = 'block'; prog.textContent = '① 송영정보 파싱 중...';
+  try {
+    const tripInfo = await parseTripInfo(trip.files[0]);
+    prog.textContent = '② 송영서비스 엑셀 파싱 중...';
+    const { users, month } = await parseExcel(excel.files[0], tripInfo);
+    prog.textContent = '③ HWPX 문서 교체 중...';
+    const { blob, warnings } = await processHwpx(hwpx.files[0], users, month);
+    prog.style.display = 'none';
+
+    const yr = new Date().getFullYear();
+    const fn = `주간활동송영서비스_${yr}.${String(month).padStart(2,'0')}.hwpx`;
+    const url = URL.createObjectURL(blob);
+
+    const names = Object.keys(users).sort();
+    let rows = '';
+    names.forEach((n,idx) => {
+      const u = users[n];
+      rows += `<tr><td>${idx+1}</td><td>${n}</td><td>${u.group_str}</td>
+        <td>${u.am_min?u.am_min+'분':'-'}</td><td>${u.pm_min?u.pm_min+'분':'-'}</td>
+        <td>${u.day_count}일</td><td>${u.date_range}</td><td>${u.total_hours_int}시간</td>
+        <td>${u.unit_price.toLocaleString()}원</td><td>${u.final_cost.toLocaleString()}원</td></tr>`;
+    });
+
+    let wHtml = warnings.length ? `<div class="warn-list">${warnings.join('<br>')}</div>` : '';
+    resA.innerHTML = `<div class="result">
+      <h2>${month}월 송영서비스 처리 완료</h2>
+      <div class="info">총 ${names.length}명 처리 완료</div>
+      <a class="dl-btn" href="${url}" download="${fn}">문서 다운로드 (${fn})</a>
+      ${wHtml}
+      <table class="data"><thead><tr>
+        <th>No</th><th>이용자명</th><th>그룹</th><th>오전</th><th>오후</th>
+        <th>일수</th><th>날짜범위</th><th>총시간</th><th>단가</th><th>비용</th>
+      </tr></thead><tbody>${rows}</tbody></table></div>`;
+    msgA.innerHTML = '<div class="msg ok">문서가 성공적으로 생성되었습니다.</div>';
+  } catch(err) {
+    prog.style.display = 'none';
+    msgA.innerHTML = `<div class="msg err">오류: ${err.message||err}</div>`;
+    console.error(err);
+  } finally { btn.disabled = false; }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+.DS_Store
+.venv/
+*.xlsx
+*.hwpx
+*.pdf
+*.png
+unpacked_original/
+webapp/
+test_*
+__pycache__/
+*.pyc
+~$*
