@@ -297,7 +297,10 @@ function parseExcel(file, tripInfo) {
           u.am_hours_str = u.am_day_count > 0 && u.am_min ? fmtH(amTotal) : null;
           u.pm_hours_str = u.pm_day_count > 0 && u.pm_min ? fmtH(pmTotal) : null;
           u.total_hours_int = Math.floor(actualTotalMin / 60);
-          u.final_cost = u.total_hours_int * u.unit_price;
+          u.total_remain_min = actualTotalMin % 60;
+          u.total_time_str = fmtH(actualTotalMin);
+          // 실제 분 기준 비용 계산, 10원 단위 절사
+          u.final_cost = Math.floor(actualTotalMin * u.unit_price / 60 / 10) * 10;
         }
         resolve({users, month: month || new Date().getMonth()+1});
       } catch(err) { reject(err); }
@@ -402,16 +405,16 @@ async function processHwpx(hwpxFile, usersData, newMonth) {
     else if (/^\d+×\d+일$/.test(s)) el.textContent = dMin && dDays > 0 ? `${dMin}분×${dDays}일` : '';
     else if (/^\d+시간\d+분$/.test(s)) {
       if (prev.includes('총 송영서비스 이용시간')||prev.includes('제공시간')||prev.includes('바우처'))
-        el.textContent = `${u.total_hours_int}시간`;
+        el.textContent = u.total_time_str;
       else el.textContent = dHrs || '';
     } else if (/^\d+분$/.test(s)) {
       if (prev.some(p=>p.includes('×')||p.includes('일'))) el.textContent = dHrs || '';
     } else if (/^\d+시간$/.test(s)) {
       if (prev.includes('총 송영서비스 이용시간')||prev.includes('제공시간')||prev.includes('바우처'))
-        el.textContent = `${u.total_hours_int}시간`;
+        el.textContent = u.total_time_str;
       else el.textContent = dHrs || '';
     } else if (/^\d+시간(\d+분)?×[\d,]+원?$/.test(s)||/^\d+시간(\d+분)?×[\d,]*$/.test(s))
-      el.textContent = `${u.total_hours_int}시간×${fmtCost(u.unit_price)}원`;
+      el.textContent = `${u.total_time_str}×${fmtCost(u.unit_price)}원`;
     else if (/^×[\d,]+원?$/.test(s)) el.textContent = `×${fmtCost(u.unit_price)}원`;
     else if (/^[\d,]+원$/.test(s) && s.length > 4) el.textContent = `${fmtCost(u.final_cost)}원`;
     else if (/^[\d,]+$/.test(s) && s.includes(',') && s.length >= 4) el.textContent = `${fmtCost(u.final_cost)}원`;
@@ -489,7 +492,7 @@ async function doGenerate() {
 
       rows += `<tr${trClass}><td>${idx+1}</td><td>${n}${hasExc ? ' ⚠' : ''}</td><td>${u.group_str}</td>
         <td>${amInfo}</td><td>${pmInfo}</td>
-        <td>${u.day_count}일</td><td>${u.date_range}</td><td>${u.total_hours_int}시간</td>
+        <td>${u.day_count}일</td><td>${u.date_range}</td><td>${u.total_time_str}</td>
         <td>${u.unit_price.toLocaleString()}원</td><td>${u.final_cost.toLocaleString()}원</td></tr>`;
     });
 

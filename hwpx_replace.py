@@ -240,9 +240,12 @@ def parse_excel(filepath, trip_info=None):
         u['am_hours_str'] = fmt_hours(am_total_min) if u['am_day_count'] > 0 and am_min else None
         u['pm_hours_str'] = fmt_hours(pm_total_min) if u['pm_day_count'] > 0 and pm_min else None
 
-        # 총 이용시간 (실제 합계 기반, 분 단위 절사 = 시간 단위만)
+        # 총 이용시간 (실제 합계 기반)
         u['total_hours_int'] = actual_total_min // 60
-        u['final_cost'] = u['total_hours_int'] * u['unit_price']
+        u['total_remain_min'] = actual_total_min % 60
+        u['total_time_str'] = fmt_hours(actual_total_min)
+        # 실제 분 기준 비용 계산, 10원 단위 절사
+        u['final_cost'] = (actual_total_min * u['unit_price'] // 60 // 10) * 10
 
     return users, month or datetime.now().month
 
@@ -431,9 +434,9 @@ def replace_texts_in_section(section_path, users_data, new_month):
                 if (all_t[k].text or '').strip()
             ]
             if '총 송영서비스 이용시간' in prev_texts:
-                t_el.text = f"{u['total_hours_int']}시간"
+                t_el.text = f"{u['total_time_str']}"
             elif '제공시간' in prev_texts or '바우처' in prev_texts:
-                t_el.text = f"{u['total_hours_int']}시간"
+                t_el.text = f"{u['total_time_str']}"
             elif dir_hours_str:
                 t_el.text = dir_hours_str
             else:
@@ -460,9 +463,9 @@ def replace_texts_in_section(section_path, users_data, new_month):
                 if (all_t[k].text or '').strip()
             ]
             if '총 송영서비스 이용시간' in prev_texts:
-                t_el.text = f"{u['total_hours_int']}시간"
+                t_el.text = f"{u['total_time_str']}"
             elif '제공시간' in prev_texts or '바우처' in prev_texts:
-                t_el.text = f"{u['total_hours_int']}시간"
+                t_el.text = f"{u['total_time_str']}"
             elif dir_hours_str:
                 t_el.text = dir_hours_str
             else:
@@ -470,11 +473,11 @@ def replace_texts_in_section(section_path, users_data, new_month):
 
         # 5a. 산출내역 비용 통합 ("9시간×13,820원", "16시간30분×13,820원")
         elif re.match(r'^\d+시간(?:\d+분)?×[\d,]+원$', stripped):
-            t_el.text = f"{u['total_hours_int']}시간×{u['unit_price']:,}원"
+            t_el.text = f"{u['total_time_str']}×{u['unit_price']:,}원"
 
         # 5b. 산출내역 비용 (원 없음)
         elif re.match(r'^\d+시간(?:\d+분)?×[\d,]*$', stripped):
-            t_el.text = f"{u['total_hours_int']}시간×{u['unit_price']:,}원"
+            t_el.text = f"{u['total_time_str']}×{u['unit_price']:,}원"
 
         # 5c. 산출내역 비용 분리형 ("×25,910원")
         elif re.match(r'^×[\d,]+원$', stripped):
