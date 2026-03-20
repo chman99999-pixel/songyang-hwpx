@@ -179,27 +179,41 @@ def parse_excel(filepath, trip_info=None):
         u['am_min'] = am_min
         u['pm_min'] = pm_min
 
-        # 방향별 일수 계산: 총시간으로 추가 방향 감지
+        # 방향별 일수 계산: 총시간으로 추가 방향/부분일 감지
         am_dates = []
         pm_dates = []
         detected_extra_min = None
 
         for rt in u['row_times']:
+            actual = rt['min']
             if am_min and pm_min:
-                am_dates.append(rt['date'])
-                pm_dates.append(rt['date'])
+                # 양방향 이용자
+                expected = am_min + pm_min
+                if actual >= expected:
+                    # 정상: 양쪽 모두
+                    am_dates.append(rt['date'])
+                    pm_dates.append(rt['date'])
+                elif am_min != pm_min:
+                    # 오전/오후 시간이 다르면 구분 가능
+                    if abs(actual - am_min) <= abs(actual - pm_min):
+                        am_dates.append(rt['date'])  # 오전만 (조퇴)
+                    else:
+                        pm_dates.append(rt['date'])  # 오후만 (지각)
+                else:
+                    # 오전=오후 시간 동일, 구분 불가 → 오전으로 할당
+                    am_dates.append(rt['date'])
             elif am_min and not pm_min:
                 am_dates.append(rt['date'])
-                if rt['min'] > am_min:
+                if actual > am_min:
                     pm_dates.append(rt['date'])
                     if detected_extra_min is None:
-                        detected_extra_min = rt['min'] - am_min
+                        detected_extra_min = actual - am_min
             elif pm_min and not am_min:
                 pm_dates.append(rt['date'])
-                if rt['min'] > pm_min:
+                if actual > pm_min:
                     am_dates.append(rt['date'])
                     if detected_extra_min is None:
-                        detected_extra_min = rt['min'] - pm_min
+                        detected_extra_min = actual - pm_min
 
         # 추가 방향 per-trip 시간 설정
         if not pm_min and pm_dates:
@@ -214,18 +228,20 @@ def parse_excel(filepath, trip_info=None):
         u['am_date_range'] = make_date_range(am_dates)
         u['pm_date_range'] = make_date_range(pm_dates)
 
-        # 방향별 총 분 계산
+        # 방향별 총 분 계산 (표시용)
         am_total_min = (am_min or 0) * u['am_day_count']
         pm_total_min = (pm_min or 0) * u['pm_day_count']
-        total_min = am_total_min + pm_total_min
+
+        # 실제 총시간 합계로 비용 계산 (가장 정확)
+        actual_total_min = sum(rt['min'] for rt in u['row_times'])
 
         u['am_hours_raw'] = am_total_min
         u['pm_hours_raw'] = pm_total_min
         u['am_hours_str'] = fmt_hours(am_total_min) if u['am_day_count'] > 0 and am_min else None
         u['pm_hours_str'] = fmt_hours(pm_total_min) if u['pm_day_count'] > 0 and pm_min else None
 
-        # 총 이용시간 (분 단위 절사 = 시간 단위만)
-        u['total_hours_int'] = total_min // 60
+        # 총 이용시간 (실제 합계 기반, 분 단위 절사 = 시간 단위만)
+        u['total_hours_int'] = actual_total_min // 60
         u['final_cost'] = u['total_hours_int'] * u['unit_price']
 
     return users, month or datetime.now().month

@@ -174,26 +174,41 @@ function parseExcel(file, tripInfo) {
           u.am_min = ti.am_min || null;
           u.pm_min = ti.pm_min || null;
 
-          // 방향별 일수 계산: 총시간으로 추가 방향 감지
+          // 방향별 일수 계산: 총시간으로 추가 방향/부분일 감지
           const amDates = [], pmDates = [];
           let detectedExtraMin = null;
           for (const rt of u.row_times) {
+            const actual = rt.min;
             if (u.am_min && u.pm_min) {
-              // 양방향: 모든 날 양쪽
-              amDates.push(rt.date); pmDates.push(rt.date);
+              // 양방향 이용자
+              const expected = u.am_min + u.pm_min;
+              if (actual >= expected) {
+                // 정상: 양쪽 모두
+                amDates.push(rt.date); pmDates.push(rt.date);
+              } else if (u.am_min !== u.pm_min) {
+                // 오전/오후 시간이 다르면 구분 가능
+                if (Math.abs(actual - u.am_min) <= Math.abs(actual - u.pm_min)) {
+                  amDates.push(rt.date); // 오전만 (조퇴)
+                } else {
+                  pmDates.push(rt.date); // 오후만 (지각)
+                }
+              } else {
+                // 오전=오후 시간 동일 (예: 둘 다 30분), 구분 불가 → 오전으로 할당
+                amDates.push(rt.date);
+              }
             } else if (u.am_min && !u.pm_min) {
               // 오전만: 항상 AM, 총시간 > am_min이면 PM도
               amDates.push(rt.date);
-              if (rt.min > u.am_min) {
+              if (actual > u.am_min) {
                 pmDates.push(rt.date);
-                if (!detectedExtraMin) detectedExtraMin = rt.min - u.am_min;
+                if (!detectedExtraMin) detectedExtraMin = actual - u.am_min;
               }
             } else if (u.pm_min && !u.am_min) {
               // 오후만: 항상 PM, 총시간 > pm_min이면 AM도
               pmDates.push(rt.date);
-              if (rt.min > u.pm_min) {
+              if (actual > u.pm_min) {
                 amDates.push(rt.date);
-                if (!detectedExtraMin) detectedExtraMin = rt.min - u.pm_min;
+                if (!detectedExtraMin) detectedExtraMin = actual - u.pm_min;
               }
             }
           }
@@ -207,13 +222,14 @@ function parseExcel(file, tripInfo) {
           u.am_date_range = dateRange(amDates);
           u.pm_date_range = dateRange(pmDates);
 
+          // 실제 총시간 합계로 비용 계산 (가장 정확)
+          const actualTotalMin = u.row_times.reduce((sum, rt) => sum + rt.min, 0);
           const amTotal = (u.am_min || 0) * u.am_day_count;
           const pmTotal = (u.pm_min || 0) * u.pm_day_count;
-          const totalMin = amTotal + pmTotal;
 
           u.am_hours_str = u.am_day_count > 0 && u.am_min ? fmtH(amTotal) : null;
           u.pm_hours_str = u.pm_day_count > 0 && u.pm_min ? fmtH(pmTotal) : null;
-          u.total_hours_int = Math.floor(totalMin / 60);
+          u.total_hours_int = Math.floor(actualTotalMin / 60);
           u.final_cost = u.total_hours_int * u.unit_price;
         }
         resolve({users, month: month || new Date().getMonth()+1});
