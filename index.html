@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>송영서비스 HWPX 생성기</title>
+<title>감사합니다 센터 송영서비스 정산기</title>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
@@ -93,7 +93,7 @@
   <div class="header">
     <img src="로고-3d-1.jpeg" alt="로고">
     <div class="header-text">
-      <h1>송영서비스 HWPX 생성기</h1>
+      <h1>감사합니다 센터 송영서비스 정산기</h1>
       <p>원본 한글 파일, 엑셀 바우처 데이터, 송영정보를 업로드하면<br>월/날짜/시간/비용이 자동 교체된 한글 문서를 생성합니다.</p>
     </div>
   </div>
@@ -102,21 +102,21 @@
     <h2>파일 업로드</h2>
     <div class="file-row">
       <div class="step">1</div>
-      <label>원본 HWPX (.hwpx)</label>
+      <label>송영서비스 한글파일 (.hwpx)</label>
       <input type="file" id="hwpxFile" accept=".hwpx">
     </div>
     <div class="file-row">
       <div class="step">2</div>
-      <label>송영서비스 엑셀 (.xlsx)</label>
+      <label>송영 바우처 엑셀파일 (.xlsx)</label>
       <input type="file" id="excelFile" accept=".xlsx,.xls">
     </div>
     <div class="file-row">
       <div class="step">3</div>
-      <label>송영정보 엑셀 (.xlsx)</label>
+      <label>이용자 송영정보 엑셀파일 (.xlsx)</label>
       <input type="file" id="tripFile" accept=".xlsx,.xls">
     </div>
     <p class="hint">송영정보: 이용자별 오전/오후 송영 시간이 기재된 파일</p>
-    <button class="btn" id="genBtn" onclick="doGenerate()">HWPX 문서 생성</button>
+    <button class="btn" id="genBtn" onclick="doGenerate()">송영 정산 문서 생성하기</button>
   </div>
 
   <div id="progress">처리 중...</div>
