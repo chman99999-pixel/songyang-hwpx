@@ -7,65 +7,117 @@
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
-  * { box-sizing: border-box; }
-  body { font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
-  .container { max-width: 920px; margin: 0 auto; background: #fff; border-radius: 12px; padding: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-  h1 { margin: 0 0 8px; font-size: 22px; color: #333; }
-  p.sub { margin: 0 0 24px; color: #888; font-size: 13px; }
-  .row { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
-  .row label { min-width: 180px; font-weight: bold; font-size: 14px; }
-  .row input { flex: 1; font-size: 13px; }
-  .btn { display: block; width: 100%; padding: 14px; background: #1976d2; color: #fff; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; margin-top: 20px; }
-  .btn:hover { background: #1565c0; }
-  .btn:disabled { background: #999; cursor: not-allowed; }
-  .hint { font-size: 11px; color: #999; margin-top: 2px; }
-  .msg { margin-top: 16px; padding: 12px; border-radius: 8px; font-size: 14px; }
-  .msg.ok { background: #e8f5e9; color: #2e7d32; }
-  .msg.err { background: #ffebee; color: #c62828; }
-  .result { margin-top: 24px; }
-  .result h2 { font-size: 17px; margin: 0 0 4px; color: #333; }
-  .result .info { font-size: 13px; color: #666; margin-bottom: 12px; }
-  .dl-btn { display: inline-block; padding: 10px 24px; background: #1976d2; color: #fff; border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: bold; margin-bottom: 16px; cursor: pointer; border: none; }
-  .dl-btn:hover { background: #1565c0; }
-  table.data { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
-  table.data th { background: #f0f0f0; padding: 7px 5px; border: 1px solid #ddd; text-align: center; font-weight: bold; }
-  table.data td { padding: 6px 5px; border: 1px solid #ddd; text-align: center; }
-  table.data tr:hover { background: #f9f9f9; }
-  .warn-list { margin: 12px 0; padding: 10px 16px; background: #fff3e0; border-radius: 6px; font-size: 13px; color: #e65100; }
-  #progress { display: none; margin-top: 16px; padding: 12px; background: #e3f2fd; border-radius: 8px; font-size: 14px; color: #1565c0; }
-  table.data tr.has-exception { background: #fff8e1; }
-  table.data tr.has-exception td { color: #e65100; }
-  .exc-badge { display: inline-block; font-size: 10px; padding: 1px 5px; border-radius: 3px; margin-left: 2px; font-weight: bold; }
-  .exc-badge.early { background: #ffe0b2; color: #e65100; }
-  .exc-badge.late { background: #e1bee7; color: #7b1fa2; }
-  .exc-badge.extra { background: #b3e5fc; color: #0277bd; }
-  .exc-badge.partial { background: #ffcdd2; color: #c62828; }
-  .exc-detail { margin: 12px 0; padding: 12px 16px; background: #fafafa; border: 1px solid #e0e0e0; border-radius: 6px; font-size: 12px; }
-  .exc-detail h3 { margin: 0 0 8px; font-size: 14px; color: #e65100; }
-  .exc-detail .exc-user { margin-bottom: 6px; }
-  .exc-detail .exc-user strong { color: #333; }
-  .exc-detail .exc-item { margin-left: 12px; color: #666; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif; background: linear-gradient(135deg, #fef6ee 0%, #fdf2f8 50%, #f0fdf4 100%); min-height: 100vh; padding: 24px 16px; font-size: 18px; color: #333; }
+
+  .container { max-width: 1000px; margin: 0 auto; }
+
+  /* 헤더 */
+  .header { display: flex; align-items: center; gap: 20px; margin-bottom: 28px; padding: 28px 32px; background: #fff; border-radius: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.06); }
+  .header img { width: 80px; height: 80px; object-fit: contain; border-radius: 16px; }
+  .header-text h1 { font-size: 28px; color: #2d2d2d; font-weight: 800; letter-spacing: -0.5px; }
+  .header-text p { font-size: 17px; color: #888; margin-top: 6px; line-height: 1.5; }
+
+  /* 업로드 카드 */
+  .upload-card { background: #fff; border-radius: 20px; padding: 28px 32px; margin-bottom: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.06); }
+  .upload-card h2 { font-size: 20px; font-weight: 700; color: #444; margin-bottom: 20px; }
+  .file-row { display: flex; flex-direction: row; align-items: center; gap: 16px; padding: 18px 20px; margin-bottom: 12px; background: #fafafa; border: 2px dashed #e0e0e0; border-radius: 14px; transition: all 0.2s; flex-wrap: nowrap; }
+  .file-row:hover { border-color: #e8913a; background: #fff8f0; }
+  .file-row .step { display: flex; align-items: center; justify-content: center; min-width: 44px; width: 44px; height: 44px; border-radius: 12px; font-size: 20px; font-weight: 800; color: #fff; flex-shrink: 0; }
+  .file-row:nth-child(2) .step { background: linear-gradient(135deg, #e8913a, #f0a050); }
+  .file-row:nth-child(3) .step { background: linear-gradient(135deg, #d64070, #e85080); }
+  .file-row:nth-child(4) .step { background: linear-gradient(135deg, #8db600, #a0c800); }
+  .file-row label { white-space: nowrap; font-size: 18px; font-weight: 600; color: #555; cursor: pointer; min-width: 220px; }
+  .file-row input[type="file"] { font-size: 16px; flex: 1; min-width: 0; }
+  .hint { font-size: 15px; color: #aaa; margin-top: 4px; padding-left: 60px; }
+
+  /* 생성 버튼 */
+  .btn { display: block; width: 100%; padding: 20px; background: linear-gradient(135deg, #e8913a 0%, #d64070 100%); color: #fff; border: none; border-radius: 14px; font-size: 22px; font-weight: 700; cursor: pointer; margin-top: 8px; letter-spacing: 1px; transition: transform 0.15s, box-shadow 0.15s; box-shadow: 0 4px 16px rgba(214,64,112,0.25); }
+  .btn:hover { transform: translateY(-2px); box-shadow: 0 6px 24px rgba(214,64,112,0.35); }
+  .btn:active { transform: translateY(0); }
+  .btn:disabled { background: #ccc; box-shadow: none; cursor: not-allowed; transform: none; }
+
+  /* 메시지 */
+  .msg { margin-top: 16px; padding: 16px 20px; border-radius: 14px; font-size: 18px; font-weight: 600; }
+  .msg.ok { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+  .msg.err { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+
+  /* 진행 표시 */
+  #progress { display: none; margin-top: 16px; padding: 18px 24px; background: linear-gradient(135deg, #eff6ff, #f0f9ff); border: 1px solid #bfdbfe; border-radius: 14px; font-size: 18px; font-weight: 600; color: #2563eb; }
+
+  /* 결과 영역 */
+  .result { margin-top: 28px; background: #fff; border-radius: 20px; padding: 28px 32px; box-shadow: 0 4px 20px rgba(0,0,0,0.06); }
+  .result h2 { font-size: 24px; font-weight: 800; color: #2d2d2d; margin-bottom: 6px; }
+  .result .info { font-size: 17px; color: #888; margin-bottom: 20px; }
+  .dl-btn { display: inline-flex; align-items: center; gap: 8px; padding: 16px 32px; background: linear-gradient(135deg, #e8913a, #d64070); color: #fff; border-radius: 12px; text-decoration: none; font-size: 20px; font-weight: 700; margin-bottom: 20px; cursor: pointer; border: none; transition: transform 0.15s, box-shadow 0.15s; box-shadow: 0 4px 16px rgba(214,64,112,0.25); }
+  .dl-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 24px rgba(214,64,112,0.35); }
+
+  /* 결과 테이블 */
+  table.data { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 16px; margin-top: 12px; border-radius: 12px; overflow: hidden; border: 1px solid #e5e7eb; }
+  table.data th { background: linear-gradient(135deg, #f8f4f0, #f5f0f8); padding: 14px 10px; text-align: center; font-weight: 700; font-size: 15px; color: #555; border-bottom: 2px solid #e5e7eb; }
+  table.data td { padding: 12px 10px; text-align: center; border-bottom: 1px solid #f0f0f0; font-size: 16px; }
+  table.data tbody tr:hover { background: #fef7f0; }
+  table.data tbody tr:last-child td { border-bottom: none; }
+
+  /* 예외 표시 */
+  table.data tr.has-exception { background: #fffbeb; }
+  table.data tr.has-exception td { color: #d97706; font-weight: 600; }
+  .exc-badge { display: inline-block; font-size: 13px; padding: 3px 8px; border-radius: 6px; margin-left: 4px; font-weight: 700; }
+  .exc-badge.early { background: #ffedd5; color: #c2410c; }
+  .exc-badge.late { background: #f3e8ff; color: #7c3aed; }
+  .exc-badge.extra { background: #dbeafe; color: #1d4ed8; }
+  .exc-badge.partial { background: #ffe4e6; color: #be123c; }
+
+  .warn-list { margin: 16px 0; padding: 16px 20px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 12px; font-size: 16px; color: #92400e; line-height: 1.7; }
+
+  .exc-detail { margin: 16px 0; padding: 20px 24px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 14px; font-size: 16px; }
+  .exc-detail h3 { margin: 0 0 12px; font-size: 19px; font-weight: 700; color: #d97706; }
+  .exc-detail .exc-user { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #fef3c7; }
+  .exc-detail .exc-user:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
+  .exc-detail .exc-user strong { color: #2d2d2d; font-size: 17px; }
+  .exc-detail .exc-item { margin-left: 16px; margin-top: 4px; color: #78716c; font-size: 15px; line-height: 1.6; }
+
+  @media (max-width: 580px) {
+    body { padding: 12px 8px; }
+    .header { flex-direction: column; text-align: center; padding: 20px; }
+    .file-row { flex-direction: column; align-items: stretch; gap: 8px; }
+    .file-row label { min-width: auto; }
+    .hint { padding-left: 0; }
+    table.data { font-size: 14px; }
+    table.data th, table.data td { padding: 8px 4px; }
+  }
 </style>
 </head>
 <body>
 <div class="container">
-  <h1>송영서비스 HWPX 생성기</h1>
-  <p class="sub">원본 한글 파일, 엑셀 바우처 데이터, 송영정보를 업로드하면<br>월/날짜/시간/비용이 자동 교체된 한글 문서를 생성합니다.</p>
+  <div class="header">
+    <img src="로고-3d-1.jpeg" alt="로고">
+    <div class="header-text">
+      <h1>송영서비스 HWPX 생성기</h1>
+      <p>원본 한글 파일, 엑셀 바우처 데이터, 송영정보를 업로드하면<br>월/날짜/시간/비용이 자동 교체된 한글 문서를 생성합니다.</p>
+    </div>
+  </div>
 
-  <div class="row">
-    <label>① 원본 HWPX (.hwpx)</label>
-    <input type="file" id="hwpxFile" accept=".hwpx">
+  <div class="upload-card">
+    <h2>파일 업로드</h2>
+    <div class="file-row">
+      <div class="step">1</div>
+      <label>원본 HWPX (.hwpx)</label>
+      <input type="file" id="hwpxFile" accept=".hwpx">
+    </div>
+    <div class="file-row">
+      <div class="step">2</div>
+      <label>송영서비스 엑셀 (.xlsx)</label>
+      <input type="file" id="excelFile" accept=".xlsx,.xls">
+    </div>
+    <div class="file-row">
+      <div class="step">3</div>
+      <label>송영정보 엑셀 (.xlsx)</label>
+      <input type="file" id="tripFile" accept=".xlsx,.xls">
+    </div>
+    <p class="hint">송영정보: 이용자별 오전/오후 송영 시간이 기재된 파일</p>
+    <button class="btn" id="genBtn" onclick="doGenerate()">HWPX 문서 생성</button>
   </div>
-  <div class="row">
-    <label>② 송영서비스 엑셀 (.xlsx)</label>
-    <input type="file" id="excelFile" accept=".xlsx,.xls">
-  </div>
-  <div class="row">
-    <label>③ 송영정보 엑셀 (.xlsx)</label>
-    <input type="file" id="tripFile" accept=".xlsx,.xls">
-  </div>
-  <p class="hint">송영정보: 이용자별 오전/오후 송영 시간이 기재된 파일</p>
-  <button class="btn" id="genBtn" onclick="doGenerate()">HWPX 문서 생성</button>
 
   <div id="progress">처리 중...</div>
   <div id="msgArea"></div>
