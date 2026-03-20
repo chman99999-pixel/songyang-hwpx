@@ -112,12 +112,14 @@ function parseExcel(file, tripInfo) {
         const nameCol = headers['대상자명'];
         const groupCol = headers['대상자 인원'];
         const dateCol = headers['승인일시'];
+        const settlementCol = headers['결제구분'];
         const users = {};
         let month = null;
 
         for (let i = headerIdx + 1; i < rows.length; i++) {
           const r = rows[i];
           if (String(r[svcCol] || '').trim() !== '송영서비스') continue;
+          if (settlementCol !== undefined && String(r[settlementCol] || '').trim() !== '정상결제') continue;
           const name = String(r[nameCol] || '').trim();
           if (!name) continue;
           if (!users[name]) users[name] = { name, group_str: String(r[groupCol] || '').trim(), dates: [] };
