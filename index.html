@@ -141,7 +141,7 @@ function parseExcel(file, tripInfo) {
         for (let i = headerIdx + 1; i < rows.length; i++) {
           const r = rows[i];
           if (String(r[svcCol] || '').trim() !== '송영서비스') continue;
-          if (settlementCol !== undefined && String(r[settlementCol] || '').trim() !== '정상결제') continue;
+          if (settlementCol !== undefined && String(r[settlementCol] || '').trim() === '승인취소') continue;
           const name = String(r[nameCol] || '').trim();
           if (!name) continue;
           if (!users[name]) users[name] = { name, group_str: String(r[groupCol] || '').trim(), dates: [], am_dates: [], pm_dates: [], row_times: [] };

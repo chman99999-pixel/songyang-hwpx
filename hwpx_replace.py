@@ -102,7 +102,7 @@ def parse_excel(filepath, trip_info=None):
         svc_col = headers.get('서비스유형', -1)
         if svc_col < 0 or svc_col >= len(vals) or str(vals[svc_col]).strip() != '송영서비스':
             continue
-        if settlement_col >= 0 and settlement_col < len(vals) and str(vals[settlement_col] or '').strip() != '정상결제':
+        if settlement_col >= 0 and settlement_col < len(vals) and str(vals[settlement_col] or '').strip() == '승인취소':
             continue
 
         name_col = headers.get('대상자명', -1)
