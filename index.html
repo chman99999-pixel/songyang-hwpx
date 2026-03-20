@@ -113,8 +113,18 @@ function parseExcel(file, tripInfo) {
         const groupCol = headers['대상자 인원'];
         const dateCol = headers['승인일시'];
         const settlementCol = headers['결제구분'];
+        const timeCol = headers['총시간'];
         const users = {};
         let month = null;
+
+        // 총시간 파싱: '00100'→60분, '00030'→30분
+        function parseTime(s) {
+          s = String(s||'').trim();
+          if (!s || s.length < 5) return 0;
+          const h = parseInt(s.substring(0, 3)) || 0;
+          const m = parseInt(s.substring(3)) || 0;
+          return h * 60 + m;
+        }
 
         for (let i = headerIdx + 1; i < rows.length; i++) {
           const r = rows[i];
@@ -122,12 +132,32 @@ function parseExcel(file, tripInfo) {
           if (settlementCol !== undefined && String(r[settlementCol] || '').trim() !== '정상결제') continue;
           const name = String(r[nameCol] || '').trim();
           if (!name) continue;
-          if (!users[name]) users[name] = { name, group_str: String(r[groupCol] || '').trim(), dates: [] };
+          if (!users[name]) users[name] = { name, group_str: String(r[groupCol] || '').trim(), dates: [], am_dates: [], pm_dates: [], row_times: [] };
           const dStr = String(r[dateCol] || '').trim();
+          const rowMin = timeCol !== undefined ? parseTime(r[timeCol]) : 0;
           if (dStr) {
             const d = new Date(dStr);
-            if (!isNaN(d)) { users[name].dates.push(d); if (!month) month = d.getMonth() + 1; }
+            if (!isNaN(d)) {
+              users[name].dates.push(d);
+              users[name].row_times.push({ date: d, min: rowMin });
+              if (!month) month = d.getMonth() + 1;
+            }
           }
+        }
+
+        function fmtH(min) {
+          const h = Math.floor(min/60), m = min%60;
+          if (h>0 && m>0) return `${h}시간${m}분`;
+          if (h>0) return `${h}시간`;
+          if (m>0) return `${m}분`;
+          return '0시간';
+        }
+        const fmtD = d => `${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')}`;
+        function dateRange(arr) {
+          if (!arr.length) return '';
+          arr.sort((a,b) => a-b);
+          if (arr.length === 1) return fmtD(arr[0]);
+          return `${fmtD(arr[0])}~${fmtD(arr[arr.length-1])}`;
         }
 
         for (const name of Object.keys(users)) {
@@ -138,25 +168,51 @@ function parseExcel(file, tripInfo) {
           else u.unit_price = 13820;
           u.dates.sort((a,b) => a-b);
           u.day_count = u.dates.length;
-          if (u.dates.length > 0) {
-            const fmt = d => `${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')}`;
-            u.date_range = `${fmt(u.dates[0])}~${fmt(u.dates[u.dates.length-1])}`;
-          } else u.date_range = '';
+          u.date_range = dateRange(u.dates);
+
           const ti = tripInfo[name] || {};
           u.am_min = ti.am_min || null;
           u.pm_min = ti.pm_min || null;
-          const amTotal = (u.am_min || 0) * u.day_count;
-          const pmTotal = (u.pm_min || 0) * u.day_count;
-          const totalMin = amTotal + pmTotal;
-          function fmtH(min) {
-            const h = Math.floor(min/60), m = min%60;
-            if (h>0 && m>0) return `${h}시간${m}분`;
-            if (h>0) return `${h}시간`;
-            if (m>0) return `${m}분`;
-            return '0시간';
+
+          // 방향별 일수 계산: 총시간으로 추가 방향 감지
+          const amDates = [], pmDates = [];
+          let detectedExtraMin = null;
+          for (const rt of u.row_times) {
+            if (u.am_min && u.pm_min) {
+              // 양방향: 모든 날 양쪽
+              amDates.push(rt.date); pmDates.push(rt.date);
+            } else if (u.am_min && !u.pm_min) {
+              // 오전만: 항상 AM, 총시간 > am_min이면 PM도
+              amDates.push(rt.date);
+              if (rt.min > u.am_min) {
+                pmDates.push(rt.date);
+                if (!detectedExtraMin) detectedExtraMin = rt.min - u.am_min;
+              }
+            } else if (u.pm_min && !u.am_min) {
+              // 오후만: 항상 PM, 총시간 > pm_min이면 AM도
+              pmDates.push(rt.date);
+              if (rt.min > u.pm_min) {
+                amDates.push(rt.date);
+                if (!detectedExtraMin) detectedExtraMin = rt.min - u.pm_min;
+              }
+            }
           }
-          u.am_hours_str = u.am_min ? fmtH(amTotal) : null;
-          u.pm_hours_str = u.pm_min ? fmtH(pmTotal) : null;
+
+          // 추가 방향 per-trip 시간 설정
+          if (!u.pm_min && pmDates.length > 0) u.pm_min = detectedExtraMin || u.am_min;
+          if (!u.am_min && amDates.length > 0) u.am_min = detectedExtraMin || u.pm_min;
+
+          u.am_day_count = amDates.length;
+          u.pm_day_count = pmDates.length;
+          u.am_date_range = dateRange(amDates);
+          u.pm_date_range = dateRange(pmDates);
+
+          const amTotal = (u.am_min || 0) * u.am_day_count;
+          const pmTotal = (u.pm_min || 0) * u.pm_day_count;
+          const totalMin = amTotal + pmTotal;
+
+          u.am_hours_str = u.am_day_count > 0 && u.am_min ? fmtH(amTotal) : null;
+          u.pm_hours_str = u.pm_day_count > 0 && u.pm_min ? fmtH(pmTotal) : null;
           u.total_hours_int = Math.floor(totalMin / 60);
           u.final_cost = u.total_hours_int * u.unit_price;
         }
@@ -212,8 +268,9 @@ async function processHwpx(hwpxFile, usersData, newMonth) {
     }
     if (!curUser || !usersData[curUser]) continue;
     const u = usersData[curUser];
-    const pmOnly = (u.am_min === null && u.pm_min !== null);
-    const amOnly = (u.am_min !== null && u.pm_min === null);
+    // am_day_count/pm_day_count 기반 판단 (추가 방향 감지 반영)
+    const pmOnly = (u.am_day_count === 0 && u.pm_day_count > 0);
+    const amOnly = (u.am_day_count > 0 && u.pm_day_count === 0);
 
     if (['주거지→','거주지→','제공기관→'].includes(s)) {
       dirCount++;
@@ -246,19 +303,20 @@ async function processHwpx(hwpxFile, usersData, newMonth) {
       if (s && !stru.includes(s) && !s.startsWith('※')) { el.textContent = ''; continue; }
     }
 
-    let dMin, dHrs;
-    if (curDir==='am') { dMin=u.am_min; dHrs=u.am_hours_str||''; }
-    else if (curDir==='pm') { dMin=u.pm_min; dHrs=u.pm_hours_str||''; }
-    else { dMin=u.am_min||u.pm_min; dHrs=u.am_hours_str||u.pm_hours_str||''; }
+    // 방향별 per-trip 분, 일수, 날짜범위, 시간문자열
+    let dMin, dHrs, dDays, dDateRange;
+    if (curDir==='am') { dMin=u.am_min; dHrs=u.am_hours_str||''; dDays=u.am_day_count; dDateRange=u.am_date_range; }
+    else if (curDir==='pm') { dMin=u.pm_min; dHrs=u.pm_hours_str||''; dDays=u.pm_day_count; dDateRange=u.pm_date_range; }
+    else { dMin=u.am_min||u.pm_min; dHrs=u.am_hours_str||u.pm_hours_str||''; dDays=u.day_count; dDateRange=u.date_range; }
 
     const prev = [];
     for (let k=Math.max(0,i-5); k<i; k++) { const t2=(tEls[k].textContent||'').trim(); if(t2) prev.push(t2); }
     const fmtCost = n => n.toLocaleString();
 
-    if (oldDateRe.test(s)) el.textContent = dMin!=null ? u.date_range : '';
-    else if (oldSingleRe.test(s)) el.textContent = dMin!=null ? u.date_range : '';
-    else if (/^\d+분?\s*×\d+일$/.test(s)) el.textContent = dMin ? `${dMin}분×${u.day_count}일` : '';
-    else if (/^\d+×\d+일$/.test(s)) el.textContent = dMin ? `${dMin}분×${u.day_count}일` : '';
+    if (oldDateRe.test(s)) el.textContent = dDays > 0 ? dDateRange : '';
+    else if (oldSingleRe.test(s)) el.textContent = dDays > 0 ? dDateRange : '';
+    else if (/^\d+분?\s*×\d+일$/.test(s)) el.textContent = dMin && dDays > 0 ? `${dMin}분×${dDays}일` : '';
+    else if (/^\d+×\d+일$/.test(s)) el.textContent = dMin && dDays > 0 ? `${dMin}분×${dDays}일` : '';
     else if (/^\d+시간\d+분$/.test(s)) {
       if (prev.includes('총 송영서비스 이용시간')||prev.includes('제공시간')||prev.includes('바우처'))
         el.textContent = `${u.total_hours_int}시간`;
@@ -317,8 +375,10 @@ async function doGenerate() {
     let rows = '';
     names.forEach((n,idx) => {
       const u = users[n];
+      const amInfo = u.am_day_count > 0 ? `${u.am_min}분×${u.am_day_count}일` : '-';
+      const pmInfo = u.pm_day_count > 0 ? `${u.pm_min}분×${u.pm_day_count}일` : '-';
       rows += `<tr><td>${idx+1}</td><td>${n}</td><td>${u.group_str}</td>
-        <td>${u.am_min?u.am_min+'분':'-'}</td><td>${u.pm_min?u.pm_min+'분':'-'}</td>
+        <td>${amInfo}</td><td>${pmInfo}</td>
         <td>${u.day_count}일</td><td>${u.date_range}</td><td>${u.total_hours_int}시간</td>
         <td>${u.unit_price.toLocaleString()}원</td><td>${u.final_cost.toLocaleString()}원</td></tr>`;
     });

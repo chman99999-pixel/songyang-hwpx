@@ -86,6 +86,16 @@ def parse_excel(filepath, trip_info=None):
     month = None
 
     settlement_col = headers.get('결제구분', -1)
+    time_col = headers.get('총시간', -1)
+
+    def parse_time_str(s):
+        """총시간 파싱: '00100'→60분, '00030'→30분"""
+        s = str(s or '').strip()
+        if not s or len(s) < 5:
+            return 0
+        h = int(s[:3]) if s[:3].isdigit() else 0
+        m = int(s[3:]) if s[3:].isdigit() else 0
+        return h * 60 + m
 
     for row in ws.iter_rows(min_row=header_row + 1):
         vals = [cell.value for cell in row]
@@ -103,25 +113,49 @@ def parse_excel(filepath, trip_info=None):
         if name not in users:
             group_col = headers.get('대상자 인원', -1)
             group_str = str(vals[group_col]).strip() if group_col >= 0 and vals[group_col] else ''
-            users[name] = {'name': name, 'group_str': group_str, 'dates': []}
+            users[name] = {'name': name, 'group_str': group_str, 'dates': [], 'row_times': []}
 
         u = users[name]
+
+        # 총시간 파싱
+        row_min = parse_time_str(vals[time_col]) if time_col >= 0 and time_col < len(vals) else 0
 
         date_col = headers.get('승인일시', -1)
         if date_col >= 0 and vals[date_col]:
             d = vals[date_col]
             if isinstance(d, datetime):
                 u['dates'].append(d)
+                u['row_times'].append({'date': d, 'min': row_min})
                 if not month:
                     month = d.month
             elif isinstance(d, str):
                 try:
                     d = datetime.strptime(d.strip()[:10], '%Y-%m-%d')
                     u['dates'].append(d)
+                    u['row_times'].append({'date': d, 'min': row_min})
                     if not month:
                         month = d.month
                 except:
                     pass
+
+    def fmt_hours(minutes):
+        h = minutes // 60
+        m = minutes % 60
+        if h > 0 and m > 0:
+            return f"{h}시간{m}분"
+        elif h > 0:
+            return f"{h}시간"
+        elif m > 0:
+            return f"{m}분"
+        return "0시간"
+
+    def make_date_range(dates):
+        if not dates:
+            return ''
+        dates = sorted(dates)
+        if len(dates) == 1:
+            return dates[0].strftime('%m.%d')
+        return f"{dates[0].strftime('%m.%d')}~{dates[-1].strftime('%m.%d')}"
 
     # 계산
     for name, u in users.items():
@@ -135,40 +169,60 @@ def parse_excel(filepath, trip_info=None):
 
         u['dates'].sort()
         u['day_count'] = len(u['dates'])
-        u['date_range'] = (f"{u['dates'][0].strftime('%m.%d')}~{u['dates'][-1].strftime('%m.%d')}"
-                           if u['dates'] else '')
+        u['date_range'] = make_date_range(u['dates'])
 
         # 송영정보에서 방향별 시간 가져오기
         ti = (trip_info or {}).get(name, {})
         am_min = ti.get('am_min')
         pm_min = ti.get('pm_min')
 
-        u['am_min'] = am_min  # 오전 (거주지→제공기관) per-trip 분
-        u['pm_min'] = pm_min  # 오후 (제공기관→주거지) per-trip 분
+        u['am_min'] = am_min
+        u['pm_min'] = pm_min
+
+        # 방향별 일수 계산: 총시간으로 추가 방향 감지
+        am_dates = []
+        pm_dates = []
+        detected_extra_min = None
+
+        for rt in u['row_times']:
+            if am_min and pm_min:
+                am_dates.append(rt['date'])
+                pm_dates.append(rt['date'])
+            elif am_min and not pm_min:
+                am_dates.append(rt['date'])
+                if rt['min'] > am_min:
+                    pm_dates.append(rt['date'])
+                    if detected_extra_min is None:
+                        detected_extra_min = rt['min'] - am_min
+            elif pm_min and not am_min:
+                pm_dates.append(rt['date'])
+                if rt['min'] > pm_min:
+                    am_dates.append(rt['date'])
+                    if detected_extra_min is None:
+                        detected_extra_min = rt['min'] - pm_min
+
+        # 추가 방향 per-trip 시간 설정
+        if not pm_min and pm_dates:
+            u['pm_min'] = detected_extra_min or am_min
+            pm_min = u['pm_min']
+        if not am_min and am_dates:
+            u['am_min'] = detected_extra_min or pm_min
+            am_min = u['am_min']
+
+        u['am_day_count'] = len(am_dates)
+        u['pm_day_count'] = len(pm_dates)
+        u['am_date_range'] = make_date_range(am_dates)
+        u['pm_date_range'] = make_date_range(pm_dates)
 
         # 방향별 총 분 계산
-        am_total_min = (am_min or 0) * u['day_count']
-        pm_total_min = (pm_min or 0) * u['day_count']
+        am_total_min = (am_min or 0) * u['am_day_count']
+        pm_total_min = (pm_min or 0) * u['pm_day_count']
         total_min = am_total_min + pm_total_min
 
-        # 방향별 시간 (분→시간, 분 단위 절사는 총합에서만)
-        u['am_hours_raw'] = am_total_min  # 분 단위
-        u['pm_hours_raw'] = pm_total_min  # 분 단위
-
-        # 방향별 송영시간 표시 (시간+분)
-        def fmt_hours(minutes):
-            h = minutes // 60
-            m = minutes % 60
-            if h > 0 and m > 0:
-                return f"{h}시간{m}분"
-            elif h > 0:
-                return f"{h}시간"
-            elif m > 0:
-                return f"{m}분"
-            return "0시간"
-
-        u['am_hours_str'] = fmt_hours(am_total_min) if am_min else None
-        u['pm_hours_str'] = fmt_hours(pm_total_min) if pm_min else None
+        u['am_hours_raw'] = am_total_min
+        u['pm_hours_raw'] = pm_total_min
+        u['am_hours_str'] = fmt_hours(am_total_min) if u['am_day_count'] > 0 and am_min else None
+        u['pm_hours_str'] = fmt_hours(pm_total_min) if u['pm_day_count'] > 0 and pm_min else None
 
         # 총 이용시간 (분 단위 절사 = 시간 단위만)
         u['total_hours_int'] = total_min // 60
@@ -240,13 +294,9 @@ def replace_texts_in_section(section_path, users_data, new_month):
 
         u = users_data[current_user]
 
-        # pm-only 판정: 오전 없고 오후만 있는 이용자
-        is_pm_only = (u.get('am_min') is None and u.get('pm_min') is not None)
-        direction_row_num = getattr(replace_texts_in_section, '_dir_row', {})
-
-        # 방향 감지: "주거지→" or "거주지→" = am (오전), "제공기관→" = pm (오후)
-        # is_am_only: 오전만 있는 이용자
-        is_am_only = (u.get('am_min') is not None and u.get('pm_min') is None)
+        # am_day_count/pm_day_count 기반 판정 (추가 방향 감지 반영)
+        is_pm_only = (u.get('am_day_count', 0) == 0 and u.get('pm_day_count', 0) > 0)
+        is_am_only = (u.get('am_day_count', 0) > 0 and u.get('pm_day_count', 0) == 0)
 
         if stripped in ['주거지→', '거주지→', '제공기관→']:
             direction_row_count += 1
@@ -310,46 +360,52 @@ def replace_texts_in_section(section_path, users_data, new_month):
                 i += 1
                 continue
 
-        # 현재 방향에 맞는 per-trip 분과 시간
+        # 현재 방향에 맞는 per-trip 분, 일수, 날짜범위, 시간문자열
         if current_direction == 'am':
             dir_min = u.get('am_min')
             dir_hours_str = u.get('am_hours_str', '')
+            dir_days = u.get('am_day_count', 0)
+            dir_date_range = u.get('am_date_range', '')
         elif current_direction == 'pm':
             dir_min = u.get('pm_min')
             dir_hours_str = u.get('pm_hours_str', '')
+            dir_days = u.get('pm_day_count', 0)
+            dir_date_range = u.get('pm_date_range', '')
         else:
             dir_min = u.get('am_min') or u.get('pm_min')
             dir_hours_str = u.get('am_hours_str') or u.get('pm_hours_str') or ''
+            dir_days = u.get('day_count', 0)
+            dir_date_range = u.get('date_range', '')
 
         # --- 교체 로직 (월 교체는 위에서 이미 처리) ---
 
         # 2a. 날짜 범위 교체
         if old_date_pattern.match(stripped):
-            if dir_min is not None:
-                t_el.text = u['date_range']
+            if dir_days > 0:
+                t_el.text = dir_date_range
             else:
-                t_el.text = ''  # 해당 방향 없으면 비움
+                t_el.text = ''
 
         # 2b. 단독 날짜 교체
         elif re.match(rf'^{old_month_str}\.\d{{2}}$', stripped):
-            if dir_min is not None:
-                t_el.text = u['date_range']
+            if dir_days > 0:
+                t_el.text = dir_date_range
             else:
                 t_el.text = ''
 
         # 3a. 산출내역 분×일 ("30분×16일", "30 ×17일" 공백 포함)
         elif re.match(r'^\d+분?\s*×\d+일$', stripped):
-            if dir_min:
-                t_el.text = f"{dir_min}분×{u['day_count']}일"
+            if dir_min and dir_days > 0:
+                t_el.text = f"{dir_min}분×{dir_days}일"
             else:
-                t_el.text = ''  # 해당 방향 없으면 비움
+                t_el.text = ''
 
         # 3b. 산출내역 비정형 ("30×1일" - 분 없는 패턴)
         elif re.match(r'^\d+×\d+일$', stripped):
-            if dir_min:
-                t_el.text = f"{dir_min}분×{u['day_count']}일"
+            if dir_min and dir_days > 0:
+                t_el.text = f"{dir_min}분×{dir_days}일"
             else:
-                t_el.text = ''  # 해당 방향 없으면 비움
+                t_el.text = ''
 
         # 4a. 송영시간 "8시간30분" (시간+분 복합)
         elif re.match(r'^\d+시간\d+분$', stripped):
