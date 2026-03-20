@@ -246,8 +246,9 @@ function parseExcel(file, tripInfo) {
           }
 
           // 방향별 일수 계산: 총시간으로 추가 방향/부분일 감지
-          const amDates = [], pmDates = [];
+          const amDates = [], pmDates = [], excDates = [];
           let detectedExtraMin = null;
+          let excPerMin = 30; // 3번줄 per-trip 분 (기본 30분)
           u.exceptions = []; // 예외상황 기록
           const fmtDate = d => `${d.getMonth()+1}/${d.getDate()}`;
           for (const rt of u.row_times) {
@@ -257,18 +258,24 @@ function parseExcel(file, tripInfo) {
               const expected = u.am_min + u.pm_min;
               if (actual >= expected) {
                 amDates.push(rt.date); pmDates.push(rt.date);
+              } else if (u.am_min !== u.pm_min && actual !== u.am_min && actual !== u.pm_min) {
+                // 오전≠오후이고, 해당일 시간이 오전/오후 어느 쪽에도 안 맞는 경우 → 3번줄
+                excDates.push(rt.date);
+                excPerMin = actual;
+                u.exceptions.push({ date: rt.date, type: 'partial_day', desc: `${fmtDate(rt.date)} ${actual}분 (3번줄 별도 표시)` });
               } else if (u.am_min !== u.pm_min) {
+                // 오전 또는 오후 한쪽만 해당
                 if (Math.abs(actual - u.am_min) <= Math.abs(actual - u.pm_min)) {
                   amDates.push(rt.date);
-                  u.exceptions.push({ date: rt.date, type: 'early_leave', desc: `${fmtDate(rt.date)} 조퇴 (오후 송영 없음, ${actual}분)` });
+                  u.exceptions.push({ date: rt.date, type: 'am_only', desc: `${fmtDate(rt.date)} 오전 송영만 (${actual}분)` });
                 } else {
                   pmDates.push(rt.date);
-                  u.exceptions.push({ date: rt.date, type: 'late_arrival', desc: `${fmtDate(rt.date)} 지각 (오전 송영 없음, ${actual}분)` });
+                  u.exceptions.push({ date: rt.date, type: 'pm_only', desc: `${fmtDate(rt.date)} 오후 송영만 (${actual}분)` });
                 }
               } else {
                 // 오전=오후 시간 동일, 구분 불가
                 amDates.push(rt.date);
-                u.exceptions.push({ date: rt.date, type: 'partial', desc: `${fmtDate(rt.date)} 조퇴/지각 (한 방향만, ${actual}분)` });
+                u.exceptions.push({ date: rt.date, type: 'partial', desc: `${fmtDate(rt.date)} 한 방향만 (${actual}분)` });
               }
             } else if (u.am_min && !u.pm_min) {
               amDates.push(rt.date);
@@ -295,6 +302,13 @@ function parseExcel(file, tripInfo) {
           u.pm_day_count = pmDates.length;
           u.am_date_range = dateRange(amDates);
           u.pm_date_range = dateRange(pmDates);
+
+          // 3번줄 데이터 (오전≠오후인 이용자의 30분 별도일)
+          u.exc_day_count = excDates.length;
+          u.exc_per_min = excPerMin;
+          u.exc_date_range = dateRange(excDates);
+          const excTotal = excPerMin * excDates.length;
+          u.exc_hours_str = excDates.length > 0 ? fmtH(excTotal) : '';
 
           // 실제 총시간 합계로 비용 계산 (가장 정확)
           const actualTotalMin = u.row_times.reduce((sum, rt) => sum + rt.min, 0);
@@ -386,12 +400,19 @@ async function processHwpx(hwpxFile, usersData, newMonth) {
               if ((tEls[j].textContent||'').trim()==='주거지') { tEls[j].textContent='제공기관'; break; }
           }
         } else { curDir = det; clearing = true; el.textContent = ''; }
-      } else { curDir = det; clearing = false; }
+      } else {
+        // 양방향 이용자
+        if (dirCount <= 2) { curDir = det; clearing = false; }
+        else if (dirCount === 3) {
+          if (u.exc_day_count > 0) { curDir = 'exc'; clearing = false; }
+          else { curDir = det; clearing = true; el.textContent = ''; }
+        } else { curDir = det; clearing = true; el.textContent = ''; }
+      }
     } else if (s.includes('총 송영서비스 이용시간')) { curDir = 'total'; clearing = false; }
     else if (/^[1-4]$/.test(s)) clearing = false;
     else if (['송영서비스 제공 내역','송영서비스 시간 및 이용','연번','보호자'].includes(s)) clearing = false;
 
-    if (clearing && (curDir==='am'||curDir==='pm')) {
+    if (clearing && (curDir==='am'||curDir==='pm'||curDir==='exc')) {
       const stru = ['1','2','3','4','연번','구분','일시 및 시간','장소','산출내역','송영시간','총 송영서비스 이용시간','송영서비스 시간 및 이용','송영서비스 제공 내역'];
       if (s && !stru.includes(s) && !s.startsWith('※')) { el.textContent = ''; continue; }
     }
@@ -400,6 +421,7 @@ async function processHwpx(hwpxFile, usersData, newMonth) {
     let dMin, dHrs, dDays, dDateRange;
     if (curDir==='am') { dMin=u.am_min; dHrs=u.am_hours_str||''; dDays=u.am_day_count; dDateRange=u.am_date_range; }
     else if (curDir==='pm') { dMin=u.pm_min; dHrs=u.pm_hours_str||''; dDays=u.pm_day_count; dDateRange=u.pm_date_range; }
+    else if (curDir==='exc') { dMin=u.exc_per_min; dHrs=u.exc_hours_str||''; dDays=u.exc_day_count; dDateRange=u.exc_date_range; }
     else { dMin=u.am_min||u.pm_min; dHrs=u.am_hours_str||u.pm_hours_str||''; dDays=u.day_count; dDateRange=u.date_range; }
 
     const prev = [];
@@ -478,13 +500,17 @@ async function doGenerate() {
       if (hasExc) {
         const excTypes = new Set(u.exceptions.map(e => e.type));
         let badges = '';
-        if (excTypes.has('early_leave') || excTypes.has('partial')) {
-          const cnt = u.exceptions.filter(e => e.type==='early_leave'||e.type==='partial').length;
-          badges += `<span class="exc-badge early">조퇴 ${cnt}일</span>`;
+        if (excTypes.has('partial_day')) {
+          const cnt = u.exceptions.filter(e => e.type==='partial_day').length;
+          badges += `<span class="exc-badge early">3번줄 ${cnt}일</span>`;
         }
-        if (excTypes.has('late_arrival')) {
-          const cnt = u.exceptions.filter(e => e.type==='late_arrival').length;
-          badges += `<span class="exc-badge late">지각 ${cnt}일</span>`;
+        if (excTypes.has('am_only') || excTypes.has('partial')) {
+          const cnt = u.exceptions.filter(e => e.type==='am_only'||e.type==='partial').length;
+          badges += `<span class="exc-badge early">오전만 ${cnt}일</span>`;
+        }
+        if (excTypes.has('pm_only')) {
+          const cnt = u.exceptions.filter(e => e.type==='pm_only').length;
+          badges += `<span class="exc-badge late">오후만 ${cnt}일</span>`;
         }
         if (excTypes.has('extra_pm')) {
           const cnt = u.exceptions.filter(e => e.type==='extra_pm').length;
@@ -511,8 +537,9 @@ async function doGenerate() {
       let excItems = excUsers.map(eu => {
         const lines = eu.exceptions.map(e => {
           let icon = '';
-          if (e.type === 'early_leave' || e.type === 'partial') icon = '🟠';
-          else if (e.type === 'late_arrival') icon = '🟣';
+          if (e.type === 'partial_day') icon = '🟡';
+          else if (e.type === 'am_only' || e.type === 'partial') icon = '🟠';
+          else if (e.type === 'pm_only') icon = '🟣';
           else icon = '🔵';
           return `<div class="exc-item">${icon} ${e.desc}</div>`;
         }).join('');

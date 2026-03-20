@@ -192,6 +192,8 @@ def parse_excel(filepath, trip_info=None):
         # 방향별 일수 계산: 총시간으로 추가 방향/부분일 감지
         am_dates = []
         pm_dates = []
+        exc_dates = []  # 3번줄용 (오전≠오후인 이용자의 별도일)
+        exc_per_min = 30  # 3번줄 per-trip 분 기본값
         detected_extra_min = None
 
         for rt in u['row_times']:
@@ -203,12 +205,16 @@ def parse_excel(filepath, trip_info=None):
                     # 정상: 양쪽 모두
                     am_dates.append(rt['date'])
                     pm_dates.append(rt['date'])
+                elif am_min != pm_min and actual != am_min and actual != pm_min:
+                    # 오전≠오후이고, 어느 쪽에도 안 맞는 경우 → 3번줄
+                    exc_dates.append(rt['date'])
+                    exc_per_min = actual
                 elif am_min != pm_min:
-                    # 오전/오후 시간이 다르면 구분 가능
+                    # 오전 또는 오후 한쪽만 해당
                     if abs(actual - am_min) <= abs(actual - pm_min):
-                        am_dates.append(rt['date'])  # 오전만 (조퇴)
+                        am_dates.append(rt['date'])
                     else:
-                        pm_dates.append(rt['date'])  # 오후만 (지각)
+                        pm_dates.append(rt['date'])
                 else:
                     # 오전=오후 시간 동일, 구분 불가 → 오전으로 할당
                     am_dates.append(rt['date'])
@@ -237,6 +243,13 @@ def parse_excel(filepath, trip_info=None):
         u['pm_day_count'] = len(pm_dates)
         u['am_date_range'] = make_date_range(am_dates)
         u['pm_date_range'] = make_date_range(pm_dates)
+
+        # 3번줄 데이터 (오전≠오후인 이용자의 별도일)
+        u['exc_day_count'] = len(exc_dates)
+        u['exc_per_min'] = exc_per_min
+        u['exc_date_range'] = make_date_range(exc_dates)
+        exc_total = exc_per_min * len(exc_dates)
+        u['exc_hours_str'] = fmt_hours(exc_total) if exc_dates else ''
 
         # 방향별 총 분 계산 (표시용)
         am_total_min = (am_min or 0) * u['am_day_count']
@@ -366,9 +379,22 @@ def replace_texts_in_section(section_path, users_data, new_month):
                     clearing_row = True
                     t_el.text = ''
             else:
-                # 양방향: 각 방향 데이터 그대로
-                current_direction = detected_dir
-                clearing_row = False
+                # 양방향 이용자
+                if direction_row_count <= 2:
+                    current_direction = detected_dir
+                    clearing_row = False
+                elif direction_row_count == 3:
+                    if u.get('exc_day_count', 0) > 0:
+                        current_direction = 'exc'
+                        clearing_row = False
+                    else:
+                        current_direction = detected_dir
+                        clearing_row = True
+                        t_el.text = ''
+                else:
+                    current_direction = detected_dir
+                    clearing_row = True
+                    t_el.text = ''
         elif '총 송영서비스 이용시간' in stripped:
             current_direction = 'total'
             clearing_row = False
@@ -380,7 +406,7 @@ def replace_texts_in_section(section_path, users_data, new_month):
             clearing_row = False
 
         # clearing_row 모드: 해당 방향이 없으면 장소 등 모든 데이터 비움
-        if clearing_row and current_direction in ('am', 'pm'):
+        if clearing_row and current_direction in ('am', 'pm', 'exc'):
             structural = ['1', '2', '3', '4', '연번', '구분', '일시 및 시간',
                           '장소', '산출내역', '송영시간', '총 송영서비스 이용시간',
                           '송영서비스 시간 및 이용', '송영서비스 제공 내역']
@@ -400,6 +426,11 @@ def replace_texts_in_section(section_path, users_data, new_month):
             dir_hours_str = u.get('pm_hours_str', '')
             dir_days = u.get('pm_day_count', 0)
             dir_date_range = u.get('pm_date_range', '')
+        elif current_direction == 'exc':
+            dir_min = u.get('exc_per_min')
+            dir_hours_str = u.get('exc_hours_str', '')
+            dir_days = u.get('exc_day_count', 0)
+            dir_date_range = u.get('exc_date_range', '')
         else:
             dir_min = u.get('am_min') or u.get('pm_min')
             dir_hours_str = u.get('am_hours_str') or u.get('pm_hours_str') or ''
