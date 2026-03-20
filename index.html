@@ -33,6 +33,18 @@
   table.data tr:hover { background: #f9f9f9; }
   .warn-list { margin: 12px 0; padding: 10px 16px; background: #fff3e0; border-radius: 6px; font-size: 13px; color: #e65100; }
   #progress { display: none; margin-top: 16px; padding: 12px; background: #e3f2fd; border-radius: 8px; font-size: 14px; color: #1565c0; }
+  table.data tr.has-exception { background: #fff8e1; }
+  table.data tr.has-exception td { color: #e65100; }
+  .exc-badge { display: inline-block; font-size: 10px; padding: 1px 5px; border-radius: 3px; margin-left: 2px; font-weight: bold; }
+  .exc-badge.early { background: #ffe0b2; color: #e65100; }
+  .exc-badge.late { background: #e1bee7; color: #7b1fa2; }
+  .exc-badge.extra { background: #b3e5fc; color: #0277bd; }
+  .exc-badge.partial { background: #ffcdd2; color: #c62828; }
+  .exc-detail { margin: 12px 0; padding: 12px 16px; background: #fafafa; border: 1px solid #e0e0e0; border-radius: 6px; font-size: 12px; }
+  .exc-detail h3 { margin: 0 0 8px; font-size: 14px; color: #e65100; }
+  .exc-detail .exc-user { margin-bottom: 6px; }
+  .exc-detail .exc-user strong { color: #333; }
+  .exc-detail .exc-item { margin-left: 12px; color: #666; }
 </style>
 </head>
 <body>
@@ -177,38 +189,41 @@ function parseExcel(file, tripInfo) {
           // 방향별 일수 계산: 총시간으로 추가 방향/부분일 감지
           const amDates = [], pmDates = [];
           let detectedExtraMin = null;
+          u.exceptions = []; // 예외상황 기록
+          const fmtDate = d => `${d.getMonth()+1}/${d.getDate()}`;
           for (const rt of u.row_times) {
             const actual = rt.min;
             if (u.am_min && u.pm_min) {
               // 양방향 이용자
               const expected = u.am_min + u.pm_min;
               if (actual >= expected) {
-                // 정상: 양쪽 모두
                 amDates.push(rt.date); pmDates.push(rt.date);
               } else if (u.am_min !== u.pm_min) {
-                // 오전/오후 시간이 다르면 구분 가능
                 if (Math.abs(actual - u.am_min) <= Math.abs(actual - u.pm_min)) {
-                  amDates.push(rt.date); // 오전만 (조퇴)
+                  amDates.push(rt.date);
+                  u.exceptions.push({ date: rt.date, type: 'early_leave', desc: `${fmtDate(rt.date)} 조퇴 (오후 송영 없음, ${actual}분)` });
                 } else {
-                  pmDates.push(rt.date); // 오후만 (지각)
+                  pmDates.push(rt.date);
+                  u.exceptions.push({ date: rt.date, type: 'late_arrival', desc: `${fmtDate(rt.date)} 지각 (오전 송영 없음, ${actual}분)` });
                 }
               } else {
-                // 오전=오후 시간 동일 (예: 둘 다 30분), 구분 불가 → 오전으로 할당
+                // 오전=오후 시간 동일, 구분 불가
                 amDates.push(rt.date);
+                u.exceptions.push({ date: rt.date, type: 'partial', desc: `${fmtDate(rt.date)} 조퇴/지각 (한 방향만, ${actual}분)` });
               }
             } else if (u.am_min && !u.pm_min) {
-              // 오전만: 항상 AM, 총시간 > am_min이면 PM도
               amDates.push(rt.date);
               if (actual > u.am_min) {
                 pmDates.push(rt.date);
                 if (!detectedExtraMin) detectedExtraMin = actual - u.am_min;
+                u.exceptions.push({ date: rt.date, type: 'extra_pm', desc: `${fmtDate(rt.date)} 오후 송영 추가 (${actual}분)` });
               }
             } else if (u.pm_min && !u.am_min) {
-              // 오후만: 항상 PM, 총시간 > pm_min이면 AM도
               pmDates.push(rt.date);
               if (actual > u.pm_min) {
                 amDates.push(rt.date);
                 if (!detectedExtraMin) detectedExtraMin = actual - u.pm_min;
+                u.exceptions.push({ date: rt.date, type: 'extra_am', desc: `${fmtDate(rt.date)} 오전 송영 추가 (${actual}분)` });
               }
             }
           }
@@ -389,22 +404,66 @@ async function doGenerate() {
 
     const names = Object.keys(users).sort();
     let rows = '';
+    let excUsers = []; // 예외상황 있는 이용자
     names.forEach((n,idx) => {
       const u = users[n];
-      const amInfo = u.am_day_count > 0 ? `${u.am_min}분×${u.am_day_count}일` : '-';
-      const pmInfo = u.pm_day_count > 0 ? `${u.pm_min}분×${u.pm_day_count}일` : '-';
-      rows += `<tr><td>${idx+1}</td><td>${n}</td><td>${u.group_str}</td>
+      const hasExc = u.exceptions && u.exceptions.length > 0;
+      const trClass = hasExc ? ' class="has-exception"' : '';
+
+      // 오전/오후 정보에 예외 뱃지 추가
+      let amInfo = u.am_day_count > 0 ? `${u.am_min}분×${u.am_day_count}일` : '-';
+      let pmInfo = u.pm_day_count > 0 ? `${u.pm_min}분×${u.pm_day_count}일` : '-';
+      if (hasExc) {
+        const excTypes = new Set(u.exceptions.map(e => e.type));
+        let badges = '';
+        if (excTypes.has('early_leave') || excTypes.has('partial')) {
+          const cnt = u.exceptions.filter(e => e.type==='early_leave'||e.type==='partial').length;
+          badges += `<span class="exc-badge early">조퇴 ${cnt}일</span>`;
+        }
+        if (excTypes.has('late_arrival')) {
+          const cnt = u.exceptions.filter(e => e.type==='late_arrival').length;
+          badges += `<span class="exc-badge late">지각 ${cnt}일</span>`;
+        }
+        if (excTypes.has('extra_pm')) {
+          const cnt = u.exceptions.filter(e => e.type==='extra_pm').length;
+          badges += `<span class="exc-badge extra">오후추가 ${cnt}일</span>`;
+        }
+        if (excTypes.has('extra_am')) {
+          const cnt = u.exceptions.filter(e => e.type==='extra_am').length;
+          badges += `<span class="exc-badge extra">오전추가 ${cnt}일</span>`;
+        }
+        excUsers.push({ name: n, exceptions: u.exceptions, badges });
+      }
+
+      rows += `<tr${trClass}><td>${idx+1}</td><td>${n}${hasExc ? ' ⚠' : ''}</td><td>${u.group_str}</td>
         <td>${amInfo}</td><td>${pmInfo}</td>
         <td>${u.day_count}일</td><td>${u.date_range}</td><td>${u.total_hours_int}시간</td>
         <td>${u.unit_price.toLocaleString()}원</td><td>${u.final_cost.toLocaleString()}원</td></tr>`;
     });
 
     let wHtml = warnings.length ? `<div class="warn-list">${warnings.join('<br>')}</div>` : '';
+
+    // 예외상황 상세
+    let excHtml = '';
+    if (excUsers.length > 0) {
+      let excItems = excUsers.map(eu => {
+        const lines = eu.exceptions.map(e => {
+          let icon = '';
+          if (e.type === 'early_leave' || e.type === 'partial') icon = '🟠';
+          else if (e.type === 'late_arrival') icon = '🟣';
+          else icon = '🔵';
+          return `<div class="exc-item">${icon} ${e.desc}</div>`;
+        }).join('');
+        return `<div class="exc-user"><strong>${eu.name}</strong> ${eu.badges}${lines}</div>`;
+      }).join('');
+      excHtml = `<div class="exc-detail"><h3>⚠ 예외상황 ${excUsers.length}명</h3>${excItems}</div>`;
+    }
+
     resA.innerHTML = `<div class="result">
       <h2>${month}월 송영서비스 처리 완료</h2>
-      <div class="info">총 ${names.length}명 처리 완료</div>
+      <div class="info">총 ${names.length}명 처리 완료${excUsers.length > 0 ? ` (예외 ${excUsers.length}명)` : ''}</div>
       <a class="dl-btn" href="${url}" download="${fn}">문서 다운로드 (${fn})</a>
-      ${wHtml}
+      ${wHtml}${excHtml}
       <table class="data"><thead><tr>
         <th>No</th><th>이용자명</th><th>그룹</th><th>오전</th><th>오후</th>
         <th>일수</th><th>날짜범위</th><th>총시간</th><th>단가</th><th>비용</th>
