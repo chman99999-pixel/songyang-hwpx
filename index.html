@@ -238,6 +238,13 @@ function parseExcel(file, tripInfo) {
           u.am_min = ti.am_min || null;
           u.pm_min = ti.pm_min || null;
 
+          // 송영정보에 없는 이용자: 바우처 데이터에서 추론
+          if (!u.am_min && !u.pm_min && u.row_times.length > 0) {
+            const typicalMin = u.row_times.map(rt => rt.min).sort((a,b) => a-b)[Math.floor(u.row_times.length/2)];
+            if (typicalMin >= 60) { u.am_min = 30; u.pm_min = 30; }
+            else { u.am_min = typicalMin || 30; }
+          }
+
           // 방향별 일수 계산: 총시간으로 추가 방향/부분일 감지
           const amDates = [], pmDates = [];
           let detectedExtraMin = null;

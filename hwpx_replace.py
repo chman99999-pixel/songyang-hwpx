@@ -176,6 +176,16 @@ def parse_excel(filepath, trip_info=None):
         am_min = ti.get('am_min')
         pm_min = ti.get('pm_min')
 
+        # 송영정보에 없는 이용자: 바우처 데이터에서 추론
+        if not am_min and not pm_min and u['row_times']:
+            times = sorted([rt['min'] for rt in u['row_times']])
+            typical = times[len(times) // 2]
+            if typical >= 60:
+                am_min = 30
+                pm_min = 30
+            else:
+                am_min = typical or 30
+
         u['am_min'] = am_min
         u['pm_min'] = pm_min
 
